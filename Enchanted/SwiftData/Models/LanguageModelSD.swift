@@ -10,66 +10,57 @@ import SwiftData
 
 @Model
 final class LanguageModelSD: Identifiable {
-    @Attribute(.unique) var name: String
-    var isAvailable: Bool = false
+    // Use deploymentName for Azure, keep 'name' for compatibility if needed,
+    // but primary identifier for Azure will be deploymentName.
+    @Attribute(.unique) var name: String // For Azure, this will store the Deployment Name
     var imageSupport: Bool = false
-    @Attribute var modelProvider: ModelProvider? = ModelProvider.ollama
-    
+    @Attribute var provider: ModelProvider = .azure // Default to Azure now, or handle migration
+
     @Relationship(deleteRule: .cascade, inverse: \ConversationSD.model)
     var conversations: [ConversationSD]? = []
-    
-    
-    init(name: String, imageSupport: Bool = false, modelProvider: ModelProvider) {
-        self.name = name
+
+    init(name: String, imageSupport: Bool = false, provider: ModelProvider) {
+        self.name = name // Store Deployment Name here
         self.imageSupport = imageSupport
-        self.modelProvider = modelProvider
+        self.provider = provider
     }
-    
+
+    @Transient var isAvailable: Bool {
+        // For Azure, availability depends on endpoint/key validity, not Ollama's check
+        // We'll assume configured models are "available" for selection.
+        true
+    }
+
     @Transient var isNotAvailable: Bool {
-        isAvailable == false
+        !isAvailable
     }
 }
 
 // MARK: - Helpers
 extension LanguageModelSD {
-    var prettyName: String {
-        guard let modelName = name.components(separatedBy: ":").first else {
-            return name
-        }
-        
-        return modelName.capitalized
+    // Keep helpers, but adapt them if needed. Pretty name might just be the deployment name.
+    @Transient var prettyName: String {
+        name // Deployment name is usually user-friendly enough
     }
-    
-    var prettyVersion: String {
-        let components = name.components(separatedBy: ":")
-        if components.count >= 2 {
-            return components[1]
-        }
-        return ""
+
+    @Transient var prettyVersion: String {
+        // Azure deployments don't have versions in the same way Ollama tags do.
+        ""
     }
-    
-    var supportsImages: Bool {
-        if imageSupport {
-            return true
-        }
-        
-        /// older technique to detect image modality
-        /// @deprecated
-        let imageSupportedModels = ["llava"]
-        for modelName in imageSupportedModels {
-            if name.contains(modelName) {
-                return true
-            }
-        }
-        return false
+
+    // Update image support logic based on known Azure model capabilities (e.g., gpt-4-vision)
+    @Transient var supportsImages: Bool {
+        // You might need a more robust check based on deployment name patterns
+        // or store this capability explicitly when adding the model.
+        // Example: return name.contains("vision")
+        imageSupport // Rely on the stored value
     }
-    
+
     static let sample: [LanguageModelSD] = [
-        .init(name: "Llama:latest", modelProvider: .ollama),
-        .init(name: "Mistral:latest", modelProvider: .ollama)
+        .init(name: "gpt-4o", imageSupport: true, provider: .azure),
+        .init(name: "gpt-35-turbo", imageSupport: false, provider: .azure)
     ]
 }
-
 
 // MARK: - @unchecked Sendable
 extension LanguageModelSD: @unchecked Sendable {

@@ -10,177 +10,168 @@ import AVFoundation
 
 struct SettingsView: View {
     @Environment(\.presentationMode) var presentationMode
-    @Binding var ollamaUri: String
+
+    // Azure Bindings
+    @Binding var azureEndpoint: String
+    @Binding var azureApiKey: String
+
+    // Shared Bindings (Keep relevant ones)
     @Binding var systemPrompt: String
-    @Binding var vibrations: Bool
+    @Binding var vibrations: Bool // Keep if needed for iOS
     @Binding var colorScheme: AppColorScheme
-    @Binding var defaultOllamModel: String
-    @Binding var ollamaBearerToken: String
+    @Binding var defaultAzureModel: String // Changed from defaultOllamaModel
     @Binding var appUserInitials: String
-    @Binding var pingInterval: String
     @Binding var voiceIdentifier: String
-    @State var ollamaStatus: Bool?
+
+    // State & Actions
+    @State var azureStatus: Bool? // Optional: For testing connection
     var save: () -> ()
-    var checkServer: () -> ()
-    var deleteAll: () -> ()
-    var ollamaLangugeModels: [LanguageModelSD]
+    var checkAzureConnection: () -> () // Optional: Add a check function
+    var deleteAllConversations: () -> () // Keep if needed
+    var azureModels: [LanguageModelSD] // Changed from ollamaLanguageModels
     var voices: [AVSpeechSynthesisVoice]
-    
+    var onAddModel: (String, Bool) -> Void // Action to add a new model
+    var onDeleteModel: (LanguageModelSD) -> Void // Action to delete a model
+
     @State private var deleteConversationsDialog = false
-    
+    @State private var showAddModelSheet = false
+    @State private var newModelName: String = ""
+    @State private var newModelSupportsImage: Bool = false
+
     var body: some View {
         VStack {
+            // --- Header ---
             ZStack {
                 HStack {
-                    Button {
-                        presentationMode.wrappedValue.dismiss()
-                    } label: {
-                        Text("Cancel")
-                            .font(.system(size: 16))
-                            .foregroundStyle(Color(.label))
-                    }
-                    
-                    
-                    Spacer()
-                    
-                    Button(action: save) {
-                        Text("Save")
-                            .font(.system(size: 16))
-                            .foregroundStyle(Color(.label))
-                    }
-                }
-                
-                HStack {
-                    Spacer()
-                    Text("Settings")
-                        .font(.system(size: 16))
-                        .fontWeight(.medium)
+                    Button("Cancel") { presentationMode.wrappedValue.dismiss() }
                         .foregroundStyle(Color(.label))
                     Spacer()
+                    Button("Save", action: save)
+                         .foregroundStyle(Color(.label))
                 }
+                Text("Settings").fontWeight(.medium).foregroundStyle(Color(.label))
             }
             .padding()
-            
+
+            // --- Form ---
             Form {
-                Section(header: Text("Ollama").font(.headline)) {
-                    
-                    TextField("Ollama server URI", text: $ollamaUri, onCommit: checkServer)
-                        .textContentType(.URL)
-                        .disableAutocorrection(true)
-                        .textFieldStyle(RoundedBorderTextFieldStyle())
-#if !os(macOS)
-                        .padding(.top, 8)
-                        .keyboardType(.URL)
-                        .autocapitalization(.none)
-#endif
-                    
+                 // --- Azure OpenAI Section ---
+                 Section(header: Text("Azure OpenAI").font(.headline)) {
+                     TextField("Azure Endpoint", text: $azureEndpoint, prompt: Text("e.g., https://your-resource.openai.azure.com"))
+                         .textContentType(.URL)
+                         .disableAutocorrection(true)
+                         .textFieldStyle(RoundedBorderTextFieldStyle())
+                     #if !os(macOS)
+                         .padding(.top, 8)
+                         .keyboardType(.URL)
+                         .autocapitalization(.none)
+                     #endif
+
+                     SecureField("API Key", text: $azureApiKey)
+                         .textFieldStyle(RoundedBorderTextFieldStyle())
+
+                    // Optional: Connection Check Button
+                    // Button("Check Connection", action: checkAzureConnection)
+                 }
+
+                 // --- Model Management Section ---
+                 Section("Azure Deployments") {
+                    Picker("Default Deployment", selection: $defaultAzureModel) {
+                         Text("None").tag("") // Option for no default
+                         ForEach(azureModels.filter({ $0.provider == .azure }), id: \.name) { model in
+                             Text(model.name).tag(model.name)
+                         }
+                     }
+
+                     Text("Manage your added Azure deployment names below.")
+                         .font(.caption)
+                         .foregroundColor(.gray)
+
+                     List {
+                         ForEach(azureModels.filter({ $0.provider == .azure })) { model in
+                             HStack {
+                                 Text(model.name)
+                                 if model.supportsImages {
+                                     Image(systemName: "photo")
+                                         .foregroundColor(.gray)
+                                 }
+                                 Spacer()
+                             }
+                              .contentShape(Rectangle()) // Make row tappable for context menu
+                             .contextMenu { // Add delete via context menu
+                                Button("Delete", systemImage: "trash", role: .destructive) {
+                                    onDeleteModel(model)
+                                }
+                             }
+                         }
+                         .onDelete { indexSet in // Swipe to delete on iOS
+                             indexSet.forEach { index in
+                                 let modelToDelete = azureModels.filter({ $0.provider == .azure })[index]
+                                 onDeleteModel(modelToDelete)
+                             }
+                         }
+                     }
+
+                     Button("Add Deployment Name") {
+                         newModelName = ""
+                         newModelSupportsImage = false
+                         showAddModelSheet = true
+                     }
+                 }
+
+
+                // --- General App Settings ---
+                Section(header: Text("APP").font(.headline)) {
                     VStack(alignment: .leading) {
                         Text("System prompt")
                         TextEditor(text: $systemPrompt)
                             .font(.system(size: 13))
                             .cornerRadius(4)
+                            .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.gray.opacity(0.3), lineWidth: 1))
                             .multilineTextAlignment(.leading)
                             .frame(minHeight: 100)
                     }
-                    
-                    Picker(selection: $defaultOllamModel) {
-                        ForEach(ollamaLangugeModels, id:\.self) { model in
-                            Text(model.name).tag(model.name)
-                        }
-                    } label: {
-                        Label {
-                            Text("Default Model")
-                        } icon: {
-                            Image("ollama")
-                                .renderingMode(.template)
-                                .resizable()
-                                .scaledToFit()
-                                .foregroundColor(Color(.label))
-                                .frame(width: 24, height: 24)
-                        }
+
+                    #if os(iOS)
+                    Toggle(isOn: $vibrations) {
+                        Label("Vibrations", systemImage: "water.waves").foregroundStyle(Color.label)
                     }
-                    
-                    
-                    TextField("Bearer Token", text: $ollamaBearerToken)
-                        .disableAutocorrection(true)
-                        .textFieldStyle(RoundedBorderTextFieldStyle())
-#if os(iOS)
-                        .autocapitalization(.none)
-#endif
-                    TextField("Ping Interval (seconds)", text: $pingInterval)
-                        .disableAutocorrection(true)
-                        .textFieldStyle(RoundedBorderTextFieldStyle())
-                    
-                    Section(header: Text("APP").font(.headline).padding(.top, 20)) {
-                        
-#if os(iOS)
-                        Toggle(isOn: $vibrations, label: {
-                            Label("Vibrations", systemImage: "water.waves")
-                                .foregroundStyle(Color.label)
-                        })
-#endif
-                    }
-                    
-                    
-                    Picker(selection: $colorScheme) {
-                        ForEach(AppColorScheme.allCases, id:\.self) { scheme in
+                    #endif
+
+                    Picker("Appearance", selection: $colorScheme) {
+                        ForEach(AppColorScheme.allCases, id: \.self) { scheme in
                             Text(scheme.toString).tag(scheme.id)
                         }
                     } label: {
-                        Label("Appearance", systemImage: "sun.max")
-                            .foregroundStyle(Color.label)
+                        Label("Appearance", systemImage: "sun.max").foregroundStyle(Color.label)
                     }
-                    
-                    Picker(selection: $voiceIdentifier) {
-                        ForEach(voices, id:\.self.identifier) { voice in
-                            Text(voice.prettyName).tag(voice.identifier)
-                        }
-                    } label: {
-                        Label("Voice", systemImage: "waveform")
-                            .foregroundStyle(Color.label)
-                        
-#if os(macOS)
-                        Text("Download voices by going to Settings > Accessibility > Spoken Content > System Voice > Manage Voices.")
-#else
-                        Text("Download voices by going to Settings > Accessibility > Spoken Content > Voices.")
-#endif
-                        
-                        Button(action: {
-#if os(macOS)
-                            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.universalaccess?SpeakableItems") {
-                                NSWorkspace.shared.open(url)
-                            }
-#else
-                            let url = URL(string: "App-Prefs:root=General&path=ACCESSIBILITY")
-                            if let url = url, UIApplication.shared.canOpenURL(url) {
-                                UIApplication.shared.open(url, options: [:], completionHandler: nil)
-                            }
-#endif
-                            
-                        }) {
-                            
-                            Text("Open Settings")
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                    }
-                    
-                    
-                    TextField("Initials", text: $appUserInitials)
+
+                     Picker("Voice", selection: $voiceIdentifier) {
+                          Text("System Default").tag("")
+                         ForEach(voices, id: \.self.identifier) { voice in
+                             Text(voice.prettyName).tag(voice.identifier)
+                         }
+                     } label: {
+                         Label("Voice", systemImage: "waveform").foregroundStyle(Color.label)
+                     }
+
+
+                    TextField("User Initials", text: $appUserInitials)
                         .disableAutocorrection(true)
                         .textFieldStyle(RoundedBorderTextFieldStyle())
-#if os(iOS)
-                        .keyboardType(.URL)
+                        #if os(iOS)
                         .autocapitalization(.none)
-#endif
-                    
-                    Button(action: {deleteConversationsDialog.toggle()}) {
+                        #endif
+                }
+
+                 // --- Danger Zone ---
+                 Section(header: Text("Danger Zone").font(.headline)) {
+                    Button(role: .destructive) {
+                        deleteConversationsDialog = true
+                    } label: {
                         HStack {
                             Spacer()
-                            
-                            Text("Clear All Data")
-                                .foregroundStyle(Color(.systemRed))
-                                .padding(.vertical, 6)
-                            
+                            Text("Clear All Conversations").foregroundStyle(Color(.systemRed))
                             Spacer()
                         }
                     }
@@ -189,31 +180,60 @@ struct SettingsView: View {
             .formStyle(.grouped)
         }
         .preferredColorScheme(colorScheme.toiOSFormat)
-        .confirmationDialog("Delete All Conversations?", isPresented: $deleteConversationsDialog) {
-            Button("Delete", role: .destructive) { deleteAll() }
-            Button("Cancel", role: .cancel) { }
+        .confirmationDialog("Delete All Conversations?", isPresented: $deleteConversationsDialog, titleVisibility: .visible) {
+            Button("Delete", role: .destructive, action: deleteAllConversations)
         } message: {
-            Text("Delete All Conversations?")
+            Text("This cannot be undone.")
+        }
+        .sheet(isPresented: $showAddModelSheet) {
+             // Simple sheet to add a model name
+            VStack {
+                Text("Add Azure Deployment").font(.title2).padding()
+                TextField("Deployment Name", text: $newModelName)
+                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                    .padding(.horizontal)
+                Toggle("Supports Images (e.g., gpt-4-vision)", isOn: $newModelSupportsImage)
+                     .padding(.horizontal)
+
+                 HStack {
+                     Button("Cancel") { showAddModelSheet = false }.buttonStyle(.bordered)
+                     Spacer()
+                     Button("Add") {
+                         if !newModelName.isEmpty {
+                            onAddModel(newModelName, newModelSupportsImage)
+                         }
+                         showAddModelSheet = false
+                     }
+                     .buttonStyle(.borderedProminent)
+                     .disabled(newModelName.isEmpty)
+                 }.padding()
+
+                 Spacer()
+            }
+            #if os(macOS)
+            .frame(width: 300, height: 200)
+            #endif
         }
     }
 }
 
+// Preview needs updates to match new bindings
 #Preview {
     SettingsView(
-        ollamaUri: .constant(""),
-        systemPrompt: .constant("You are an intelligent assistant solving complex problems. You are an intelligent assistant solving complex problems. You are an intelligent assistant solving complex problems."),
+        azureEndpoint: .constant("https://your-resource.openai.azure.com"),
+        azureApiKey: .constant("YOUR_API_KEY"),
+        systemPrompt: .constant("You are a helpful AI."),
         vibrations: .constant(true),
-        colorScheme: .constant(.light),
-        defaultOllamModel: .constant("llama2"),
-        ollamaBearerToken: .constant("x"),
+        colorScheme: .constant(.system),
+        defaultAzureModel: .constant("gpt-4o"),
         appUserInitials: .constant("AM"),
-        pingInterval: .constant("5"),
-        voiceIdentifier: .constant("sample"),
+        voiceIdentifier: .constant(""),
         save: {},
-        checkServer: {},
-        deleteAll: {},
-        ollamaLangugeModels: LanguageModelSD.sample,
-        voices: []
+        checkAzureConnection: {},
+        deleteAllConversations: {},
+        azureModels: LanguageModelSD.sample,
+        voices: [],
+        onAddModel: {_,_ in },
+        onDeleteModel: {_ in }
     )
 }
-

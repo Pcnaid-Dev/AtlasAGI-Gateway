@@ -15,4 +15,5 @@ struct LanguageModel {
 
 enum ModelProvider: Codable {
     case ollama
+    case azure // Add this case
 }
